@@ -35,6 +35,7 @@ export default function App() {
   const [isRecordingPaused, setIsRecordingPaused] = useState(false);
   const [audioChunks, setAudioChunks] = useState([]);
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
+  const [availableVoices, setAvailableVoices] = useState([]);
 
   // DOM and Hardware Node References
   const chatEndRef = useRef(null);
@@ -49,6 +50,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('app-theme', theme);
   }, [theme]);
+
+  // Load available browser TTS voices (Chrome populates this list asynchronously)
+  useEffect(() => {
+    const loadVoices = () => setAvailableVoices(window.speechSynthesis.getVoices());
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -99,6 +108,50 @@ export default function App() {
     setSessions([]);
     setActiveSessionId('');
     setMessages([]);
+  };
+
+  // ===============================
+  // 🔊 Browser TTS for the AI's voice reply (replaces backend audio playback)
+  // ===============================
+  // Picks an actual male/female-sounding voice from whatever the browser/OS provides.
+  // The Web Speech API doesn't expose a gender field directly, so this matches against
+  // the common voice names used by Chrome, Edge, Safari, and Firefox.
+  const pickVoiceForGender = (gender) => {
+    if (!availableVoices.length) return null;
+
+    const englishVoices = availableVoices.filter(v => v.lang && v.lang.toLowerCase().startsWith('en'));
+    const pool = englishVoices.length ? englishVoices : availableVoices;
+
+    const femaleKeywords = ['female', 'samantha', 'victoria', 'allison', 'ava', 'susan', 'karen', 'moira', 'tessa', 'veena', 'fiona', 'kate', 'serena', 'zira', 'salli', 'joanna', 'ivy', 'kimberly', 'kendra', 'aria', 'jenny', 'emma', 'amy', 'nicky'];
+    const maleKeywords = ['male', 'daniel', 'alex', 'fred', 'aaron', 'oliver', 'arthur', 'david', 'guy', 'mark', 'justin', 'matthew', 'brian', 'russell', 'tom', 'eric'];
+
+    // Check female first since the substring "male" also occurs inside "female".
+    const isFemaleVoice = (v) => femaleKeywords.some(keyword => v.name.toLowerCase().includes(keyword));
+    const isMaleVoice = (v) => !isFemaleVoice(v) && maleKeywords.some(keyword => v.name.toLowerCase().includes(keyword));
+
+    const match = pool.find(v => gender === 'female' ? isFemaleVoice(v) : isMaleVoice(v));
+    return match || pool[0] || null;
+  };
+
+  const speakText = (text) => {
+    if (!text) return;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    utterance.rate = 1;
+
+    // Simple gender approximation as a fallback/extra differentiator
+    utterance.pitch = voiceGender === 'female' ? 1.2 : 0.9;
+
+    // Actually select a male- or female-sounding voice, not just pitch
+    const chosenVoice = pickVoiceForGender(voiceGender);
+    if (chosenVoice) {
+      utterance.voice = chosenVoice;
+      utterance.lang = chosenVoice.lang;
+    }
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
   };
 
   const fetchSessions = async () => {
@@ -316,7 +369,9 @@ export default function App() {
     setAudioChunks([]);
   };
 
-  // ✅ FIXED: Voice now shows transcribed text + AI reply as text in chat
+  // ✅ Voice flow now reads JSON from the backend (transcribed_text + response_text)
+  // and speaks the AI's reply using the browser's speechSynthesis instead of
+  // playing back an audio file from the server.
   const submitVoiceMessage = () => {
     if (!mediaRecorderRef.current || isProcessingVoice) return;
 
@@ -347,25 +402,19 @@ export default function App() {
 
         if (!response.ok) throw new Error("Audio generation process rejected.");
 
-        // Read transcribed text from response header
-        const transcribedText = response.headers.get('X-Transcribed-Text');
+        const data = await response.json();
 
         // Replace the placeholder with the real transcribed human message
-        if (transcribedText) {
+        if (data.transcribed_text) {
           setMessages(prev => {
             const updated = [...prev];
-            updated[updated.length - 1] = { sender: 'human', text: `🎤 ${transcribedText}` };
+            updated[updated.length - 1] = { sender: 'human', text: `🎤 ${data.transcribed_text}` };
             return updated;
           });
         }
 
-        // Play the audio response
-        const audioFileBlob = await response.blob();
-        const audioPlaybackUrl = URL.createObjectURL(audioFileBlob);
-        const audioEngine = new Audio(audioPlaybackUrl);
-        activeAudioRef.current = audioEngine;
-        audioEngine.load();
-        audioEngine.play();
+        // Speak the AI's reply out loud using the browser's built-in TTS
+        speakText(data.response_text);
 
         // Fetch full message history (includes AI reply text) after a short delay
         // to allow backend to finish saving

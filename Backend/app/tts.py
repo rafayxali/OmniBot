@@ -1,4 +1,30 @@
 import os
+from groq import Groq
+from dotenv import load_dotenv
+
+load_dotenv()
+
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+
+def transcribe_audio_with_groq(audio_bytes: bytes, filename: str) -> str:
+    """
+    STT using Groq Whisper (FAST + FREE TIER FRIENDLY)
+    """
+
+    try:
+        transcription = groq_client.audio.transcriptions.create(
+            file=(filename, audio_bytes),
+            model="whisper-large-v3",
+            response_format="text"
+        )
+
+        return transcription.strip()
+
+    except Exception as e:
+        raise RuntimeError(f"Groq STT Failed: {str(e)}")
+
+'''import os
 from io import BytesIO
 from google import genai
 from google.genai import types
@@ -77,4 +103,4 @@ def generate_speech_with_gemini(text: str, voice_gender: str = "female") -> Byte
         return BytesIO(audio_bytes)
 
     except Exception as e:
-        raise RuntimeError(f"Gemini Speech Synthesis (TTS) Failed: {str(e)}")
+        raise RuntimeError(f"Gemini Speech Synthesis (TTS) Failed: {str(e)}")'''
