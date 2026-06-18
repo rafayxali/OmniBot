@@ -31,7 +31,7 @@ llm = ChatGroq(
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", """You are OmniDoc, an advanced, highly perceptive AI assistant. 
 
-    You will be provided with a retrieved 'CONTEXT' section containing text chunks from standard PDFs or automated descriptions of uploaded images.
+    You may be provided with a retrieved 'CONTEXT' section containing text chunks from standard PDFs or automated descriptions of uploaded images.
 
     CRITICAL DISCREPANCY & TRUTH RULES:
     1. OBJECTIVE TRUTH & LOGIC FIRST:
